@@ -214,9 +214,9 @@ def bixi2dict(filename):
         return stations
     
 
-def read_day(year, month, day, directory='.', verbose=0):
+def read_raw(year, month=None, day=None, directory='.', verbose=0):
     """
-    Read all available data for one day.
+    Read all available raw data for one day, a month or a year.
 
     Data files are supposed to be in format AAAA-MM-DD_xxxxxx.xml.bz2. Where
     AAAA is year, MM is month, DD is day. xxxxxx could be anything. Files must be 
@@ -233,11 +233,14 @@ def read_day(year, month, day, directory='.', verbose=0):
     month : int
     
         month to import.
+        If None,import all months availables
 
 
     day : int
     
         Day to import.
+        If None,import all days availables.
+        Has to be omited (or set to None) if month=None.
 
 
     directory : str
@@ -283,7 +286,13 @@ def read_day(year, month, day, directory='.', verbose=0):
 
     Possible bug: if a station disappear and reapear during the day, corresponding bikes_abailable and max_bikes will be wrong
     """
-    list_filename = sorted(glob.glob(os.path.join(directory, "%04d-%02d-%02d_*.xml.bz2" % (year, month, day))))
+    if month is None:
+        assert day is None, "day has to be omited (or set to None) if month=None."
+        list_filename = sorted(glob.glob(os.path.join(directory, "%04d-*.xml.bz2" % (year))))
+    elif day is None:
+        list_filename = sorted(glob.glob(os.path.join(directory, "%04d-%02d-*.xml.bz2" % (year, month))))
+    else:        
+        list_filename = sorted(glob.glob(os.path.join(directory, "%04d-%02d-%02d_*.xml.bz2" % (year, month, day))))
     
     # The set of stations  sometimes change through the day. So we cannot know
     # in advance present stations.
@@ -360,7 +369,7 @@ def day2file(year, month, day, directory='.', verbose=0):
     """
     print("%04d%02d%02d" % (year, month, day))
     # Todo: read a bit before and a bit after (few minutes) to take care of the time offset
-    t, x, mx, md = read_day(year, month, day, directory=directory, verbose=verbose)
+    t, x, mx, md = read_raw(year, month, day, directory=directory, verbose=verbose)
     try:  
         # Format the time in a human readable form
         t = format_time(t)  # t is now an array (see function below)
@@ -423,4 +432,4 @@ def resample_time(X, y):
     
 
 if __name__ == '__main__':
-    t, x, max_x, md = read_day(2017, 6, 10)
+    t, x, max_x, md = read_raw(2017, 6, 10)
