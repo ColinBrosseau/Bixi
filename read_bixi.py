@@ -372,6 +372,8 @@ def day2file(year, month, day, directory='.', verbose=0):
         t = np.concatenate((year_day, weekday, minute), axis=1)
         # save data to file
         np.savez_compressed("%04d%02d%02d" % (year, month, day), time=t, bikes=x, max_bikes=mx, metadata=md)
+    except IndexError:  # day without data will not crash the program
+        pass
 
     
 def file2day(year, month, day, directory='.'):
