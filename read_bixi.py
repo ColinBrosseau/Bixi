@@ -361,16 +361,17 @@ def day2file(year, month, day, directory='.', verbose=0):
     print("%04d%02d%02d" % (year, month, day))
     # Todo: read a bit before and a bit after (few minutes) to take care of the time offset
     t, x, mx, md = read_day(year, month, day, directory=directory, verbose=verbose)
-    # Format the time in a human readable form
-    t = format_time(t)  # t is now an array (see function below)
-    # resample data over time vector. Time vector is now evenly spaced.
-    resample_time(t[:, 2:3], x)  # Resample the available bikes
-    minute = resample_time(t[:, 2:3], mx)  # Resample the number of docks
-    year_day = np.ones_like(minute) * t[0, 0]  # Recreate the day of the year column
-    weekday = np.ones_like(minute) * t[0, 1]  # Recreate the weekday column
-    t = np.concatenate((year_day, weekday, minute), axis=1)
-    # save data to file
-    np.savez_compressed("%04d%02d%02d" % (year, month, day), time=t, bikes=x, max_bikes=mx, metadata=md)
+    try:  # day without data will not crash the program
+        # Format the time in a human readable form
+        t = format_time(t)  # t is now an array (see function below)
+        # resample data over time vector. Time vector is now evenly spaced.
+        resample_time(t[:, 2:3], x)  # Resample the available bikes
+        minute = resample_time(t[:, 2:3], mx)  # Resample the number of docks
+        year_day = np.ones_like(minute) * t[0, 0]  # Recreate the day of the year column
+        weekday = np.ones_like(minute) * t[0, 1]  # Recreate the weekday column
+        t = np.concatenate((year_day, weekday, minute), axis=1)
+        # save data to file
+        np.savez_compressed("%04d%02d%02d" % (year, month, day), time=t, bikes=x, max_bikes=mx, metadata=md)
 
     
 def file2day(year, month, day, directory='.'):
@@ -420,4 +421,4 @@ def resample_time(X, y):
     
 
 if __name__ == '__main__':
-    t, x, max_x = read_day(2017, 6, 10)
+    t, x, max_x, md = read_day(2017, 6, 10)
