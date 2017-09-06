@@ -361,7 +361,7 @@ def day2file(year, month, day, directory='.', verbose=0):
     print("%04d%02d%02d" % (year, month, day))
     # Todo: read a bit before and a bit after (few minutes) to take care of the time offset
     t, x, mx, md = read_day(year, month, day, directory=directory, verbose=verbose)
-    try:  # day without data will not crash the program
+    try:  
         # Format the time in a human readable form
         t = format_time(t)  # t is now an array (see function below)
         # resample data over time vector. Time vector is now evenly spaced.
