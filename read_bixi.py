@@ -216,7 +216,7 @@ def bixi2dict(filename):
 
 def read_raw(year, month=None, day=None, directory='.', verbose=0):
     """
-    Read all available raw data for one day, a month or a year.
+    Read all available raw data for a day, a month or a year.
 
     Data files are supposed to be in format AAAA-MM-DD_xxxxxx.xml.bz2. Where
     AAAA is year, MM is month, DD is day. xxxxxx could be anything. Files must be 
