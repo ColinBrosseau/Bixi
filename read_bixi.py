@@ -4,16 +4,15 @@ Created on Wed May 31 23:59:25 2017
 
 @author: Colin-N. Brosseau
 """
-import time
 import numpy as np
+import pandas as pd
 import bz2
 import glob
 import os
-import datetime
 import xmltodict
 from xml.parsers.expat import ExpatError  # for xmltodict
 
-import matplotlib.pylab as plt
+# import matplotlib.pylab as plt
 
 """
 Remarks:
@@ -348,29 +347,57 @@ def bixi2dict(filename):
     return list_stations, last_update
         
 
-def resample_time(X, y):
+def resample_time(x_in, y_in, rule='T'):
     """
-    Calculate values over a even spaced vector.
-    Output time vector is 0 -> 1438 with steps of 2. Unit is minutes.
-    If y is a dictionnary, each key represent a vector (y). It then resample every vector
+    Convert y_in versus x_in to a new x-axis period.
+    
+    The new axis is evenly spaced.
+    
+    Parameters
+    ----------
+    x_in : array, shape (n_measurements,)
+    
+        Initial x-axis
+
+
+    y_in : array, shape (n_measurements,)
+    
+        Initial values for each point of x_in.
+
+
+    rule : str
+    
+        Period of the new resampled data.
+        
+        'H'       hourly frequency
+        'T'       minutely frequency
+        'S'       secondly frequency
+        Can be multiples. i.e. '5T' resample each 5 minutes.
+
+
+    Returns
+    -------
+    x_out: uint32, shape (n_measurements,)
+    
+        Resampled x-axis
+
+
+    y_out: uint8, shape (n_measurements,)
+    
+        Resampled y_in over x_out
+
+
     """
-    if isinstance(y, dict):
-        for key in y:
-            x_fit, y_fit = resample_time(X, y[key])
-            y[key] = y_fit
-        return x_fit
-    else:
-        if len(np.shape(X)) == 1:  # X vector must have 2 dimensions. If needed, create a simgleton dimension.
-            X = X[:, np.newaxis]
-        from sklearn.tree import DecisionTreeRegressor
-        regressor = DecisionTreeRegressor(random_state = 0)
-        regressor.fit(X, y)
-        x_fit = np.arange(0, 1440, 2)[:, np.newaxis] 
-        y_fit = regressor.predict(x_fit)
-        #plt.scatter(X, y, color = 'red')
-        #plt.plot(x_fit, y_fit, '.:', color = 'blue')
-        #plt.show()
-        return x_fit, y_fit
+    x = x_in.copy()
+    y = y_in.copy()
+    x = pd.to_datetime(x, unit='s')
+    df = pd.DataFrame(data={'y':y}, index=x)
+    df = df.resample('2T').pad().bfill()
+    
+    x_out = np.array(df.index.astype(np.int64).values // 10**9, dtype=np.uint32)
+    y_out = np.squeeze(np.array(df.values, dtype=np.uint8))
+
+    return x_out, y_out
     
 
 if __name__ == '__main__':
