@@ -9,9 +9,9 @@ import numpy as np
 import bz2
 import glob
 import os
-from xml.dom import minidom
-from convertyaml_map import convertXml2YamlAux
 import datetime
+import xmltodict
+from xml.parsers.expat import ExpatError  # for xmltodict
 
 import matplotlib.pylab as plt
 
@@ -38,181 +38,6 @@ class BadXMLFile(Exception):
     Represents a bad .xml file.
     """
     pass
-
-def bixi2np(filename):
-    """
-    Extract most interresting content of a bixi status file: time, bikes 
-    avalables, stations names and maximal number of bikes.
-    
-
-    Parameters
-    ----------
-    filename : str
-    
-        File to import. Must be in format .xml.bz2. 
-        Files are taken from https://montreal.bixi.com/data/bikeStations.xml
-
-
-    Returns
-    -------
-    measurement_time : int
-        Time of measurement in Epoch (Unix) time.    
-
-    
-    bikes_available: ndarray, shape (n_stations,)
-        Bikes availables.
-
-    
-    max_bikes: ndarray, shape (n_stations,)
-        Maximal number of bikes.
-
-
-    list_stations: list of str,  shape (n_stations,)
-        Stations names. Called 'terminalName' in the original file.    
-    """
-    try:
-        d = bixi2dict(filename)  # dict containing all stations
-    except BadXMLFile:
-        raise BadXMLFile(filename)
-        
-    list_stations = sorted(d)
-    bikes_available = np.zeros(len(list_stations), dtype=np.uint8)
-    last_comm_with_server = np.zeros(len(list_stations), dtype=np.uint32)
-    max_bikes = np.zeros(len(list_stations), dtype=np.uint8)
-    #print(output.size())
-    i = 0
-    for station in list_stations:
-        bikes_available[i] = d[station]['nbBikes']
-        last_comm_with_server[i] = int(d[station]['lastCommWithServer']/1000)
-        max_bikes[i] = bikes_available[i] + d[station]['nbEmptyDocks']
-        i += 1
-    # time of measurement
-    measurement_time = np.max(last_comm_with_server)
-    return measurement_time, bikes_available, max_bikes, list_stations
-
-def bixi2dict(filename):
-    """
-    Extract content of a bixi status file to a dictionnary.
-    
-
-    Parameters
-    ----------
-    filename : str
-    
-        File to import. Must be in format .xml.bz2. 
-        Files are taken from https://montreal.bixi.com/data/bikeStations.xml
-
-
-    Returns
-    -------
-    stations : dict of dicts
-        Each element represents a station. Keys are 'terminalName'.  
-        A station is itself a dict with fields:
-            'id' : int
-                id of the station
-                
-                
-            'installed' : bool
-                    
-                    
-            'lastCommWithServer' : int
-                time of last communication with the server  . 
-                Epoch (Unix) time * 1000           
-            
-        
-            'lastUpdateTime' : 
-                time of last update of the station  . 
-                Epoch (Unix) time * 1000           
-            
-            
-            'lat' : float
-                lattitude of the station        
-            
-            
-            'locked' : bool            
-            
-            
-            'long' : float
-                longitude of the station            
-                
-            
-            'name' : str
-                name of the station (street corners)
-            
-            
-            'nbBikes' : int
-                number of available bikes
-            
-            
-            'nbEmptyDocks' : int
-                number of empty docks
-                
-                
-            'public' : bool
-            
-            
-            'temporary' :bool
-            
-            
-            'terminalName' : int
-                terminal name
-    """
-    def convertXml2dict(filename):
-        """
-        Convert a .xml file to a dictionary.
-        
-            
-        Parameters
-        ----------
-        filename : str
-        
-            File to import. Must be in format .xml.
-    
-    
-        Returns
-        -------
-        output : dict
-            Dictionnary reprensentation of the .xml file        
-        """
-        try:
-            doc = minidom.parse(filename)
-        except:
-            raise BadXMLFile(filename)
-        else:
-            root = doc.childNodes[0]
-            # Convert the DOM tree into "YAML-able" data structures.
-            output = convertXml2YamlAux(root)
-            return output
-
-    try:
-        d = convertXml2dict(bz2.BZ2File(filename, 'r'))  # load data
-    except BadXMLFile:
-        raise BadXMLFile(filename)
-    else:        
-        stations = {}  # dict of dict each one representing a station
-        for index_station in range(len(d['children'])):
-        
-            dict_out = {}
-            for i_element in range(len(d['children'][index_station]['children'])):
-                try:
-                    field = d['children'][index_station]['children'][i_element]['name']
-                    content = d['children'][index_station]['children'][i_element]['text']
-                    dict_out[field] = content
-                except:
-                    pass
-            list_int = ['id', 'lastCommWithServer', 'lastUpdateTime', 'nbBikes', 'nbEmptyDocks', 'terminalName']
-            for key in list_int:
-                dict_out[key] = int(dict_out[key])
-            list_bool = ['installed', 'locked', 'public', 'temporary']
-            for key in list_bool:
-                dict_out[key] = bool(dict_out[key])
-            list_float = ['lat', 'long']
-            for key in list_float:
-                dict_out[key] = float(dict_out[key])
-                
-            stations[str(dict_out['terminalName'])] = dict_out
-        return stations
-    
 
 def read_raw(year, month=None, day=None, directory='.', verbose=0):
     """
@@ -294,117 +119,234 @@ def read_raw(year, month=None, day=None, directory='.', verbose=0):
     else:        
         list_filename = sorted(glob.glob(os.path.join(directory, "%04d-%02d-%02d_*.xml.bz2" % (year, month, day))))
     
-    # The set of stations  sometimes change through the day. So we cannot know
-    # in advance present stations.
-    # It is not possible to know in advance number of points in time.
-    # Some measurents are the same as the one before. Sometime files are corrupted.
-
-    # output vectors
-    time_vector = np.array([])  # vector of time
-    bikes_available = {}  # Current bikes in station
-    max_bikes = {}  # Maximum bikes in station. Number of docks.
-    stations_metadata = {}  # Metadata for stations
-    
-    i = 1
+    bn = bixi_newtork()
+    i = 0
     for filename in list_filename:
-        current_status = {}  # used for creating stations_metadata
+        i += 1
         if verbose > 0:
             print(str(i) + "/" + str(len(list_filename))  +  "   " + filename)
         try:
-            time_, bikes_available_, max_bikes_, list_stations_ = bixi2np(filename)
+            ddd, last_update = bixi2dict(filename)
+            bn.add(ddd, last_update)
         except BadXMLFile:
-            if verbose > 0:
-                print("Bad .xml file: " + filename)
-            else:
-                pass
-        else:
-            if time_ not in time_vector:
-                time_vector = np.append(time_vector, time_)
-                for station, bikes, max_bik in zip(list_stations_, bikes_available_, max_bikes_):
-                    try: 
-                        bikes_available[station] = np.append(bikes_available[station], bikes)
-                        max_bikes[station] = np.append(max_bikes[station], max_bik)
-                    except KeyError:
-                        bikes_available[station] = np.empty(len(time_vector), dtype=np.uint8)  * np.nan
-                        bikes_available[station][-1] = bikes
-                        max_bikes[station] = np.empty(len(time_vector), dtype=np.uint8)  * np.nan
-                        max_bikes[station][-1] = max_bik
-                        
-                        #  Add station metadata
-                        try:
-                            stations_metadata[station] = current_status[station]
-                        except KeyError:
-                            current_status = bixi2dict(filename)  # current status. Will be reused for other stations.
-                            stations_metadata[station] = current_status[station]
-                            if verbose > 1:
-                                print('load current status')
-                        del stations_metadata[station]['nbBikes']
-                        del stations_metadata[station]['lastCommWithServer']
-                        del stations_metadata[station]['lastUpdateTime']
-                        del stations_metadata[station]['terminalName']
-                        del stations_metadata[station]['nbEmptyDocks']
-                        if verbose > 1:
-                            print('add station ' + str(station))
-        i += 1
+            pass
+        
+    return bn
 
-    # Check that all vectors have the same length
-    for station in bikes_available:
-        if len(bikes_available[station]) < len(time_vector):  # this appends when stations disappear in the middle of the day
-            if verbose > 1:
-                print(str(station) + ' was wrong in length. Now corrected.')
-            remaining_items = np.empty(len(time_vector) - len(bikes_available[station]), dtype=np.uint8)  * np.nan
-            bikes_available[station] = np.append(bikes_available[station], remaining_items)
-            max_bikes[station] = np.append(max_bikes[station], remaining_items)
 
-    # Check for missing informations in stations_metadata
-    if len(stations_metadata.keys()) != len(bikes_available.keys()):
-        print("missings informations in stations_metadata")
+class bixi_newtork():
+    """
+    Contains informations related to the whole bixi network (all stations).
+    """
+    def __init__(self):
+        self.last_update = 0
+        self.stations = {}
+        
+    def add(self, d, update_time):
+        """
+        Add new informations from the network
+        
+        d : dictionnary
+        """
+        
+        # only add informations if they are new
+        if update_time != self.last_update:
+            self.last_update = update_time
+            for i in d:
+                station_name = i['terminalName']
+                try:
+                    self.stations[station_name].add(i)
+                except KeyError:
+                    self.stations[station_name] = station()
+                    self.stations[station_name].add(i)
+                    
+
+def equal_dicts(d1, d2, ignore_keys):
+    d1_filtered = dict((k, v) for k,v in d1.items() if k not in ignore_keys)
+    d2_filtered = dict((k, v) for k,v in d2.items() if k not in ignore_keys)
+    return d1_filtered == d2_filtered
             
-    return time_vector, bikes_available, max_bikes, stations_metadata
 
-
-def day2file(year, month, day, directory='.', verbose=0):
+class station():
     """
-    Export the data of one day to a numpy file.
+    Contains the informations related to a station.
     """
-    print("%04d%02d%02d" % (year, month, day))
-    # Todo: read a bit before and a bit after (few minutes) to take care of the time offset
-    t, x, mx, md = read_raw(year, month, day, directory=directory, verbose=verbose)
-    try:  
-        # Format the time in a human readable form
-        t = format_time(t)  # t is now an array (see function below)
-        # resample data over time vector. Time vector is now evenly spaced.
-        resample_time(t[:, 2:3], x)  # Resample the available bikes
-        minute = resample_time(t[:, 2:3], mx)  # Resample the number of docks
-        year_day = np.ones_like(minute) * t[0, 0]  # Recreate the day of the year column
-        weekday = np.ones_like(minute) * t[0, 1]  # Recreate the weekday column
-        t = np.concatenate((year_day, weekday, minute), axis=1)
-        # save data to file
-        np.savez_compressed("%04d%02d%02d" % (year, month, day), time=t, bikes=x, max_bikes=mx, metadata=md)
-    except IndexError:  # day without data will not crash the program
-        pass
-
+    def __init__(self):
+        # Metadata of the station
+        # list of dictionnaries
+        self.metadata = []
+        # Time of observation (unix time)
+        self.measure_time = np.array([], dtype=np.uint32)
+        # Number of available bikes
+        self.bikes = np.array([], dtype=np.uint8)  # biggest station is 89 docks
     
-def file2day(year, month, day, directory='.'):
+    def add(self, d):
+        """
+        Add new information to a station.
+        
+        d : 
+            dictionnary reprensenting the state of the station
+        """
+        dic = d.copy()
+
+        # Changing informations
+        try:
+            # Update only if there is new information in the numer of bikes
+            if dic['lastUpdateTime'] != self.measure_time[-1]:
+                self.measure_time = np.append(self.measure_time, dic['lastUpdateTime'])
+                self.bikes = np.append(self.bikes, dic['nbBikes'])
+        except IndexError:
+                self.measure_time = np.array([dic['lastUpdateTime']], dtype=np.uint32)
+                self.bikes = np.array([dic['nbBikes']], dtype=np.uint8)
+
+        # Total number of docks
+        dic['numDocks'] = dic['nbBikes'] + dic['nbEmptyDocks']
+
+        # Delete informations not related to metadata
+        del dic['lastCommWithServer']
+        del dic['nbBikes']
+        del dic['nbEmptyDocks']
+        try:
+            # Update only if metadata changed
+            if not equal_dicts(dic, self.metadata[-1], 'lastUpdateTime'):
+                self.metadata.append(dic)
+        except IndexError:
+            self.metadata = [dic]
+
+def bixi2dict(filename):
     """
-    Read data for one day from a numpy file.
-    """
-    filename = os.path.join(directory, "%04d%02d%02d.npz" % (year, month, day))
-    data = np.load(filename)
-    return data['time'], data['bikes'][()], data['max_bikes'][()], data['metadata'][()] 
+    Extract content of a bixi status file to a dictionnary.
+    
+
+    Parameters
+    ----------
+    filename : str
+    
+        File to import. Must be in format .xml.bz2. 
+        Files are taken from https://montreal.bixi.com/data/bikeStations.xml
 
 
-def format_time(t):
-    """
-    Format time vector to a human readable form.
-    """
-    # Todo: use the real time (midnight at given date) as reference instead of t[0]
-    i = 5  # we use the  tenth reading for weekday and year_day (sometimes there is a 2 minutes offset)
-    minute = np.array((t - t[0])/60)[:, np.newaxis]  # minutes of the day
-    weekday = np.ones_like(minute) * datetime.datetime.fromtimestamp(int(t[i])).weekday()  # day of the week. monday=0
-    year_day = np.ones_like(minute) * datetime.datetime.fromtimestamp(int(t[i])).timetuple().tm_yday  # day of the year
-    return np.concatenate((year_day, weekday, minute), axis=1)
+    Returns
+    -------
+    stations : list of dicts
+        Each element of the list represents a station. 
+        A station is itself a dict with fields:
 
+            'id' : int
+                id of the station
+                
+                
+            'installed' : bool
+                    
+                    
+            'lastCommWithServer' : int
+                time of last communication with the server  . 
+                Epoch (Unix) time           
+            
+        
+            'lastUpdateTime' : 
+                time of last update of the station  . 
+                Epoch (Unix) time           
+            
+            
+            'lat' : float
+                lattitude of the station        
+            
+            
+            'locked' : bool            
+            
+            
+            'long' : float
+                longitude of the station            
+                
+            
+            'name' : str
+                name of the station (street corners)
+            
+            
+            'nbBikes' : int
+                number of available bikes
+            
+            
+            'nbEmptyDocks' : int
+                number of empty docks
+                
+                
+            'public' : bool
+            
+            
+            'temporary' :bool
+            
+            
+            'terminalName' : int
+                terminal name
+                
+        last_update : int
+            last update time of the network (Unix time)
+    """
+    def xmlbz2todict(filename):
+        """
+        Convert a bz2-ed xml file to a dictionnary
+
+
+        Parameters
+        ----------
+        filename : str
+        
+            File to import. Must be in format .xml.
+            
+    
+        Returns
+        -------
+        list_stations : list
+            List of dictionnaries. Each dictionnary represent the state of a station a a given time.
+        last_update : int
+            Last update of the xml file. Unix time * 1000
+        """
+        file = bz2.BZ2File(filename, 'rb')
+        try:
+            return xmltodict.parse(file, xml_attribs=True) 
+        except ExpatError:
+            raise BadXMLFile(filename)         
+
+    d = xmlbz2todict(filename)['stations']
+    try:
+        last_update = int(int(d['@LastUpdate'])/1000)
+    except ValueError:
+        raise BadXMLFile(filename)
+    list_stations = d['station']
+    
+#    for station in list_stations:
+    for i, station in enumerate(list_stations):
+        try:
+#            print(' ')
+#            print(station)
+            list_int = ['id', 'lastCommWithServer', 'lastUpdateTime', 'nbBikes', 'nbEmptyDocks', 'terminalName']
+            for key in list_int:
+                station[key] = int(station[key])
+            list_bool = ['installed', 'locked', 'public', 'temporary']
+            for key in list_bool:
+                station[key] = bool(station[key])
+            list_float = ['lat', 'long']
+            for key in list_float:
+                station[key] = float(station[key])
+                
+            # put time in Unix time
+            station['lastUpdateTime'] = int(station['lastUpdateTime']/1000)
+            station['lastCommWithServer'] = int(station['lastCommWithServer']/1000)
+        except TypeError:
+            del list_stations[i]
+            """
+            Delete this kind of buggy data:
+            OrderedDict([('id', '595'), ('name', '4000'), ('terminalName', '4000'), 
+            ('lastCommWithServer', None), ('lat', '0'), ('long', '0'), ('installed', 'true'), 
+            ('locked', 'false'), ('installDate', None), ('removalDate', None), 
+            ('temporary', 'false'), ('public', 'true'), ('nbBikes', '0'), 
+            ('nbEmptyDocks', '0'), ('lastUpdateTime', '0')])
+            """
+        
+    return list_stations, last_update
+        
 
 def resample_time(X, y):
     """
@@ -432,4 +374,6 @@ def resample_time(X, y):
     
 
 if __name__ == '__main__':
-    t, x, max_x, md = read_raw(2017, 6, 10)
+    bn = read_raw(2017,8,31,directory='source', verbose=1)
+    
+    
